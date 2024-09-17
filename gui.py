@@ -13,7 +13,7 @@ from openpyxl.utils import get_column_letter
 import time
 from llama_index.llms.huggingface import HuggingFaceInferenceAPI
 from llama_index.core import PromptTemplate
-HF_token = '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'
+HF_token = '********'
 
 llm = HuggingFaceInferenceAPI(model_name="mistralai/Mixtral-8x7B-Instruct-v0.1", token=HF_token)
 
