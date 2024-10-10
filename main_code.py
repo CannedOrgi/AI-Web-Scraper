@@ -19,11 +19,11 @@ from llama_index.llms.huggingface import HuggingFaceInferenceAPI
 from llama_index.core import PromptTemplate
 from openai import OpenAI
 
-YOUR_API_KEY = "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"
-client = OpenAI(api_key="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", base_url="https://api.perplexity.ai")
+YOUR_API_KEY = "****"
+client = OpenAI(api_key="*****", base_url="https://api.perplexity.ai")
 
 llm_url = "https://api.perplexity.ai/chat/completions"
-HF_token = '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'
+#HF_token = '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'
 
 llm = HuggingFaceInferenceAPI(model_name="mistralai/Mixtral-8x7B-Instruct-v0.1", token=HF_token)
 
