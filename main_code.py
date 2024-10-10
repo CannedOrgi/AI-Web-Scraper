@@ -343,7 +343,7 @@ def update_file(file_name):
     return f'Successfully updated data to {excel_file}'
     
 if __name__ == "__main__":
-    for i in range len(companies_list):
+    for i in range(len(companies_list)):
       
       testimonials = explore_website(companies_list[i])
     print("Web scraping completed.")
