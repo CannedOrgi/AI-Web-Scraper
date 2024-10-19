@@ -1,31 +1,28 @@
-import output_list from companies_list.py
 import requests
+import heapq
 import re
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from collections import deque
 import os
 import json
-import webview
 import openpyxl
 import pandas as pd
 import concurrent.futures
 from PyPDF2 import PdfReader
-from flair.data import Sentence
-from flair.models import SequenceTagger
 from openpyxl.utils import get_column_letter
 import time
-from llama_index.llms.huggingface import HuggingFaceInferenceAPI
-from llama_index.core import PromptTemplate
 from openai import OpenAI
+import tiktoken
+import company_names_list_making
 
-YOUR_API_KEY = "****"
-client = OpenAI(api_key="*****", base_url="https://api.perplexity.ai")
+companies = company_names_list_making.companies
+encoder = tiktoken.get_encoding("gpt2")
+
+YOUR_API_KEY = "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"
+client = OpenAI(api_key="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", base_url="https://api.perplexity.ai")
 
 llm_url = "https://api.perplexity.ai/chat/completions"
-#HF_token = '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'
-
-llm = HuggingFaceInferenceAPI(model_name="mistralai/Mixtral-8x7B-Instruct-v0.1", token=HF_token)
 
 def google_search(query,num):
     query = query.replace(' ', '+')
@@ -70,6 +67,7 @@ def extract_text(web_url, company):
                         if page_text:
                             text += page_text
                 print(f'Done for {web_url}')
+               
                 return text
             except Exception as e:
                 print(f"Failed to read PDF {web_url}: {e}")
@@ -104,6 +102,26 @@ def extract_list_from_response(response_text):
     except Exception as e:
         print(f"Error extracting list: {e}")
         return []
+    
+def extract_dict_from_string(response_text):
+    try:
+        start_index = response_text.find('{')
+        end_index = response_text.rfind('}')
+        
+        if start_index != -1 and end_index != -1:
+            dict_string = response_text[start_index:end_index + 1]
+            
+            dict_string = dict_string.replace("'", "\"")
+            extracted_dict = json.loads(dict_string)
+            return extracted_dict
+        else:
+            return {}
+        
+    except Exception as e:
+        print(f"Error extracting dictionary: {e}")
+        return {}
+
+
 
 def get_links(url, domain):
     try:
@@ -156,15 +174,19 @@ def extract_person_names(text, url,company):
     invalid_names = {"No names", "None", "", "N/A"}
     extracted_names = [name.strip().title() for name in extracted_names if name.strip() not in invalid_names]
     if extracted_names:
+        print("Exploring...")
         print(f"{text}\n\n\n")
-        print(response_text)
+    #    #print(response_text)
     elif not extracted_names:
+        print(".")
         print("No names extracted")
+    time.sleep(0.4)
     return extracted_names
 
     
-def explore_website(start_url, max_depth=3):
+def explore_website(start_url, max_depth=5):
     try:
+        print("Process will take about 5 mins...")
         messages = [
             {
                 "role": "system",
@@ -188,12 +210,13 @@ def explore_website(start_url, max_depth=3):
         parsed_start_url = urlparse(start_url)
         domain = parsed_start_url.netloc.replace('www.', '')
         visited = set()
-        queue = deque([(start_url, 0)]) 
-        explored_links = set()
-        processed_urls = set()
+        queued_links = set()
+        queue = []
+        heapq.heappush(queue, (0, (start_url, 0)))
+        queued_links.add(start_url)
 
-        while queue and len(visited) < 400: 
-            url, depth = queue.popleft()
+        while queue and len(visited) < 150:
+            _, (url, depth) = heapq.heappop(queue)
 
             if depth > max_depth:
                 continue
@@ -202,35 +225,50 @@ def explore_website(start_url, max_depth=3):
                 continue
 
             visited.add(url)
-            explored_links.add(url)  # Collect only explored URLs
             print(f"Exploring: {url} (Depth: {depth})")
 
             links = get_links(url, domain)
 
             for link in links:
-                if link not in visited and link not in queue and link not in processed_urls:
-                    queue.append((link, depth + 1))
-                    processed_urls.add(link)
+                if link not in visited and link not in queued_links:
+                    # Assign priority
+                    priority = 0
+                    if any(pattern in link.lower() for pattern in ['uk', 'apprenticeships', 'career' 'graduate', 'testimonial', 'success', 'stories', 'early', 'program']):
+                        priority = -depth  # Higher priority
+                    else:
+                        priority = depth
+                    heapq.heappush(queue, (priority, (link, depth + 1)))
+                    queued_links.add(link)
 
-        print(f"Total links explored: {len(visited)}")
-        company_testimonials = list(explored_links)
+        
+        company_testimonials = list(visited)
+        
         company_testimonials = [{'company': company, 'web_url': company_testimonials}]
 
         def process_testimonial(comp):
-            company = comp['company']
-            web_sites = []
-            for url in comp['web_url']:
-                text = extract_text(url, company)
-                if text:
-                    web_sites.append({'company': company, 'web_content': str(text), 'url': url})
-            return web_sites
+            try:    
+                company = comp['company']
+                web_sites = []
+                for url in comp['web_url']:
+
+                    text = extract_text(url, company)
+                    print('.')
+
+                    if text:
+                        web_sites.append({'company': company, 'web_content': str(text), 'url': url})
+                return web_sites
+            except Exception as e:
+                print(f"Error in extracting text: {e}")
+                return []
 
         all_web_sites = []
         with concurrent.futures.ThreadPoolExecutor() as executor:
             results = executor.map(process_testimonial, company_testimonials)
-
+            
+            print('Processing Explored Links...')
             for result in results:
                 all_web_sites.extend(result)
+        
 
         row_list = []
 
@@ -239,15 +277,51 @@ def explore_website(start_url, max_depth=3):
                 text = part['web_content']
                 text = text.strip().replace("\n\n", " ")
                 text = re.sub(r'\s+', ' ', text)
+                num_tokens = len(encoder.encode(text))
+                if num_tokens>40000:
+                    print("No names extracted")
+                    return []
                 company = part['company']
                 url = part['url']
                 names = extract_person_names(text, url, company)
+                print('.')
 
-                return [{'Name': name, 'Company': company, 'Testimonial Page': url} for name in names]
+                if names:
+                    time.sleep(1)
+                    
+                    messages = [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Be informative"
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"""For these {names}, find what their job role was in this: {text}.
+                                Return a JSON object with the format {{\"name1\": \"job_title1\", \"name2\": \"job_title2\"}}.
+                                Don't return anything else."""
+                            ),
+                        },
+                    ]
+
+                    response = client.chat.completions.create(
+                        model="llama-3.1-sonar-small-128k-chat",
+                        messages=messages,
+                    )
+                   
+                    dict_jobs = extract_dict_from_string(response.choices[0].message.content)
+                    if not isinstance(dict_jobs, dict):
+                        dict_jobs = {}
+                    
+                if names is None:
+                    names = []
+                return [{'Name': name, 'Company': company, 'Testimonial Page': url, 'Job Title': dict_jobs[name]} for name in names]
             except Exception as e:
                 print(f"Error processing {part['url']}: {e}")
-                if 'Request rate limit exceeded' in e:
-                    time.sleep(1000)
+                if 'Request rate limit exceeded' in str(e):
+                    time.sleep(2)
                 return []
 
         for web_site in all_web_sites:
@@ -262,8 +336,7 @@ def explore_website(start_url, max_depth=3):
 
         df.drop_duplicates(subset=['Name', 'Company'], inplace=True)
 
-        df = df[df['Name'].notnull() & ~df['Name'].isin(["No names", "None", "", "N/A"])]
-
+        df = df[df['Name'].notnull() & ~df['Name'].isin(["No names", "None", "", "N/A","Mention No Names At All", "No Names Mentioned"])]
         df.to_excel(file_name, index=False)
         print(update_file(file_name))
 
@@ -288,13 +361,16 @@ def update_file(file_name):
             try:
                 name = row['Name']
                 company_name = row['Company']
-                query = f'{name} UK {company_name} profile linkedin'
+                job = row['Job Title']
+                query = f'{name} UK {company_name} {job} linkedin profile'
+                print(query)
                 link = google_search(query, 10)[0]
                 df.at[index, 'Linkedin Profile'] = link
                 print(f'Done for index {index}')
+                time.sleep(1)
             except Exception as e:
 
-                print("Max attempts reached")
+                print("Max attempts reached for Google Search.\nPlease try again with a different network or after a few hours.")
                 print(e)
                 df.at[index, 'Linkedin Profile'] = 'IP BLOCKED'
                 pass
@@ -338,12 +414,21 @@ def update_file(file_name):
     url_column = 3
 
     convert_urls_to_hyperlinks(excel_file, sheet_name, url_column)
-    url_column = 4
+    url_column = 5
     convert_urls_to_hyperlinks(excel_file, sheet_name, url_column)
     return f'Successfully updated data to {excel_file}'
+
+
+    
+
     
 if __name__ == "__main__":
-    for i in range(len(companies_list)):
-      
-      testimonials = explore_website(companies_list[i])
-    print("Web scraping completed.")
+    for i in range(len(companies)):
+            if companies[i]=='https://www.next15.com/':
+                for j in range(i, len(companies)):
+
+
+                    explore_website(companies[j])
+                break
+
+    print(f"Web scraping completed.")
