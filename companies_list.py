@@ -179,9 +179,9 @@ Grad Mentoring Sites
 pattern = r"[\d]+.\s*([^-]+)-\s*(https?://\S+)"
 matches = re.findall(pattern, text)
 
-output_list = [f"{url.strip()}" for company, url in matches]
+companies = [f"{url.strip()}" for company, url in matches]
 count=0
-for item in output_list:
+for item in companies:
     print(item)
     count+=1
 print(count)
